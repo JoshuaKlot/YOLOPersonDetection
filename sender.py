@@ -3,23 +3,19 @@ import socket
 import struct
 import time
 
-HOST = '0.0.0.0'
-PORT = 9999 # cange the port to be different on each sender
+RECEIVER_IP = 'localhost'  # Change to your receiver's IP address
+RECEIVER_PORT = 9999       # Must match receiver's listening port
 
-server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-server_socket.bind((HOST, PORT))
-server_socket.listen(1)
-print(f"[INFO] Waiting for connection on {HOST}:{PORT}...")
-conn, addr = server_socket.accept()
-print(f"[INFO] Connected to {addr}")
-conn_file = conn.makefile('wb')
+print(f"[INFO] Connecting to receiver at {RECEIVER_IP}:{RECEIVER_PORT}...")
+client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+client_socket.connect((RECEIVER_IP, RECEIVER_PORT))
+conn_file = client_socket.makefile('wb')
 
 cam = cv2.VideoCapture(0)
 if not cam.isOpened():
     print("[ERROR] Camera not available")
     conn_file.close()
-    conn.close()
-    server_socket.close()
+    client_socket.close()
     exit()
 
 print("[INFO] Ready. Press SPACE to start/stop recording, Q to quit.")
@@ -39,18 +35,16 @@ try:
         key = cv2.waitKey(1) & 0xFF
 
         if key == ord(' '):
-            if not recording and not streaming:
+            if not recording:
                 print("[INFO] Recording started. Press SPACE to stop and loop.")
                 recording = True
+                streaming = False
                 recorded_frames = []
             elif recording:
-                print(f"[INFO] Recording stopped. {len(recorded_frames)} frames captured. Now looping.")
+                print(f"[INFO] Recording stopped. {len(recorded_frames)} frames captured. Now looping. Press SPACE to make new loop.")
                 recording = False
                 streaming = True
                 loop_index = 0
-            elif streaming:
-                print("[INFO] Looping stopped. Press SPACE to record a new segment.")
-                streaming = False
 
         if key == ord('q'):
             break
@@ -64,7 +58,7 @@ try:
             conn_file.write(struct.pack('<L', len(frame_bytes)))
             conn_file.write(frame_bytes)
             conn_file.flush()
-            time.sleep(0.03)
+            time.sleep(0.03)  # Simulate ~30 FPS
             loop_index = (loop_index + 1) % len(recorded_frames)
 
     conn_file.write(struct.pack('<L', 0))  # End of stream
@@ -75,5 +69,4 @@ finally:
     cam.release()
     cv2.destroyAllWindows()
     conn_file.close()
-    conn.close()
-    server_socket.close()
+    client_socket.close()
