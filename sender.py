@@ -2,9 +2,10 @@ import cv2
 import socket
 import struct
 import time
+import random
 
-RECEIVER_IP = 'localhost'  # Change to your receiver's IP address
-RECEIVER_PORT = 9999       # Must match receiver's listening port
+RECEIVER_IP = 'localhost'
+RECEIVER_PORT = 9999
 
 print(f"[INFO] Connecting to receiver at {RECEIVER_IP}:{RECEIVER_PORT}...")
 client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -21,9 +22,13 @@ if not cam.isOpened():
 print("[INFO] Ready. Press SPACE to start/stop recording, Q to quit.")
 
 recording = False
-streaming = False
 recorded_frames = []
 loop_index = 0
+
+inserting_loop = False
+loop_insert_duration = 0
+loop_insert_start_time = 0
+next_loop_insert_time = time.time() + random.uniform(5, 15)  # initial delay before first loop
 
 try:
     while True:
@@ -36,30 +41,54 @@ try:
 
         if key == ord(' '):
             if not recording:
-                print("[INFO] Recording started. Press SPACE to stop and loop.")
+                print("[INFO] Recording started. Press SPACE to stop.")
                 recording = True
-                streaming = False
                 recorded_frames = []
-            elif recording:
-                print(f"[INFO] Recording stopped. {len(recorded_frames)} frames captured. Now looping. Press SPACE to make new loop.")
+            else:
+                print(f"[INFO] Recording stopped. {len(recorded_frames)} frames captured.")
                 recording = False
-                streaming = True
                 loop_index = 0
+                next_loop_insert_time = time.time() + random.uniform(5, 15)
 
         if key == ord('q'):
             break
 
+        # Record frames while recording
         if recording:
             recorded_frames.append(frame.copy())
 
-        if streaming and recorded_frames:
-            result, encoded = cv2.imencode('.jpg', recorded_frames[loop_index])
-            frame_bytes = encoded.tobytes()
-            conn_file.write(struct.pack('<L', len(frame_bytes)))
-            conn_file.write(frame_bytes)
-            conn_file.flush()
-            time.sleep(0.03)  # Simulate ~30 FPS
+        now = time.time()
+
+        # Decide whether to insert looped footage
+        if recorded_frames and now >= next_loop_insert_time:
+            inserting_loop = True
+            loop_insert_duration = random.uniform(2, 5)  # seconds of loop to insert
+            loop_insert_start_time = now
+            loop_index = 0
+            print(f"[INFO] Inserting looped footage for {loop_insert_duration:.1f} seconds.")
+
+            # Schedule next loop insert
+            next_loop_insert_time = now + random.uniform(10, 20)
+
+        # Choose frame source
+        if inserting_loop and recorded_frames:
+            source_frame = recorded_frames[loop_index]
             loop_index = (loop_index + 1) % len(recorded_frames)
+
+            if now - loop_insert_start_time > loop_insert_duration:
+                inserting_loop = False
+                print("[INFO] Returning to live feed.")
+        else:
+            source_frame = frame
+
+        # Encode and send the frame
+        result, encoded = cv2.imencode('.jpg', source_frame)
+        frame_bytes = encoded.tobytes()
+        conn_file.write(struct.pack('<L', len(frame_bytes)))
+        conn_file.write(frame_bytes)
+        conn_file.flush()
+
+        time.sleep(0.03)  # Simulate ~30 FPS
 
     conn_file.write(struct.pack('<L', 0))  # End of stream
 
