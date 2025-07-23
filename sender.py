@@ -4,7 +4,7 @@ import struct
 import time
 import random
 
-RECEIVER_IP = 'localhost'
+RECEIVER_IP = '192.168.0.100'
 RECEIVER_PORT = 9999
 
 print(f"[INFO] Connecting to receiver at {RECEIVER_IP}:{RECEIVER_PORT}...")
