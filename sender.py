@@ -4,7 +4,7 @@ import struct
 import time
 import random
 
-RECEIVER_IP = '192.168.0.97'
+RECEIVER_IP = '192.168.0.100'
 RECEIVER_PORT = 9999
 
 print(f"[INFO] Connecting to receiver at {RECEIVER_IP}:{RECEIVER_PORT}...")
@@ -13,6 +13,8 @@ client_socket.connect((RECEIVER_IP, RECEIVER_PORT))
 conn_file = client_socket.makefile('wb')
 
 cam = cv2.VideoCapture(0)
+cam.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+cam.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
 if not cam.isOpened():
     print("[ERROR] Camera not available")
     conn_file.close()
