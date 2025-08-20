@@ -1,1 +1,6 @@
 
+I have created a reciever to be run on a machine and act as a server and a sender to be run on raspberry pis and act as a client. 
+
+The user will run the server first, and the server will wait until a client is run and connected. The user currently has to type the server ip address directly into the code. 
+
+Once they are connected the client will stream footage from the camera
