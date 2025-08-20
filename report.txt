@@ -3,4 +3,8 @@ I have created a reciever to be run on a machine and act as a server and a sende
 
 The user will run the server first, and the server will wait until a client is run and connected. The user currently has to type the server ip address directly into the code. 
 
-Once they are connected the client will stream footage from the camera
+Once they are connected the client will stream footage from the camera. The handle clients function allows for multithreading through the same port so it can handle multiple streams at once.
+
+The reciever is design to prevent replay attacks by creating a hash set per thread and if it detects a certain amount of frames in a row with an identical hash set 
+
+The current clients can record footage with the space bar and stream the recorded footage to the server with the press of the L button
