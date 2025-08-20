@@ -4,7 +4,7 @@ import struct
 import time
 
 //Update the reciever IP depending on the recieving device
-RECEIVER_IP = '192.168.0.57'
+RECEIVER_IP = 'placeholder-ip'
 RECEIVER_PORT = 9999
 
 print(f"[INFO] Connecting to receiver at {RECEIVER_IP}:{RECEIVER_PORT}...")
