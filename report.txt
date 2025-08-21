@@ -1,7 +1,7 @@
 
 I have created a reciever to be run on a machine and act as a server and a sender to be run on raspberry pis and act as a client. 
 
-The user will run the server first, and the server will wait until a client is run and connected. The user currently has to type the server ip address directly into the code. 
+The user will run the server first, and the server will wait until a client is run and connected. Once the sender starts running the user is prompted to type in the ip address of the server. 
 
 Once they are connected the client will stream footage from the camera. The handle clients function allows for multithreading through the same port so it can handle multiple streams at once.
 
