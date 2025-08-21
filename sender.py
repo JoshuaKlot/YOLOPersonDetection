@@ -3,8 +3,8 @@ import socket
 import struct
 import time
 
-//Update the reciever IP depending on the recieving device
-RECEIVER_IP = 'placeholder-ip'
+# Ask the user for the receiver IP
+RECEIVER_IP = input("Enter the receiver IP address: ").strip()
 RECEIVER_PORT = 9999
 
 print(f"[INFO] Connecting to receiver at {RECEIVER_IP}:{RECEIVER_PORT}...")
@@ -89,6 +89,10 @@ except Exception as e:
     print(f"[ERROR] {e}")
 finally:
     cam.release()
+    cv2.destroyAllWindows()
+    conn_file.close()
+    client_socket.close()
+
     cv2.destroyAllWindows()
     conn_file.close()
     client_socket.close()
