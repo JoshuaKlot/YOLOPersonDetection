@@ -1,5 +1,6 @@
+Project goals: The goal of the current project is to stream video footage from multiple raspberry pis onto a single machine. The reciever should also detect replay attacks and repeated footage, so as to be a more accurate security system. The raspberry pis must simulate replay attacks to detect
 
-I have created a reciever to be run on a machine and act as a server and a sender to be run on raspberry pis and act as a client. 
+Project Method: I have created a reciever to be run on a machine and act as a server and a sender to be run on raspberry pis and act as a client. 
 
 The user will run the server first, and the server will wait until a client is run and connected. Once the sender starts running the user is prompted to type in the ip address of the server. 
 
