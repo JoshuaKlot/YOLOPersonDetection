@@ -12,15 +12,25 @@ client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 client_socket.connect((RECEIVER_IP, RECEIVER_PORT))
 conn_file = client_socket.makefile('wb')
 
-cam = cv2.VideoCapture(0)
-cam.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-cam.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+# ---- Find the first available camera ----
+def find_camera(max_index=10):
+    for i in range(max_index):
+        cam = cv2.VideoCapture(i)
+        if cam.isOpened():
+            print(f"[INFO] Using camera index {i}")
+            return cam
+        cam.release()
+    return None
 
-if not cam.isOpened():
-    print("[ERROR] Camera not available")
+cam = find_camera()
+if cam is None:
+    print("[ERROR] No available camera found.")
     conn_file.close()
     client_socket.close()
     exit()
+
+cam.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+cam.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
 
 print("[INFO] Ready. Press SPACE to start/stop recording, L to play loop, Q to quit.")
 
@@ -89,10 +99,6 @@ except Exception as e:
     print(f"[ERROR] {e}")
 finally:
     cam.release()
-    cv2.destroyAllWindows()
-    conn_file.close()
-    client_socket.close()
-
     cv2.destroyAllWindows()
     conn_file.close()
     client_socket.close()
