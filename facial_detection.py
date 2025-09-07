@@ -125,7 +125,7 @@ try:
             inserting_loop = True
             loop_index = 0
             
-        elif key == ord('t') and faces:
+        elif key == ord('t') and len(faces)>0:
             # Train face recognition on current face
             print("[INFO] Training face recognition on detected face...")
             # Use the first detected face for training
