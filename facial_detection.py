@@ -15,6 +15,7 @@ def load_face_database(database_path, max_faces_per_person=5):
     
     training_faces = []
     training_labels = []
+
     person_names = {}
     label_counter = 0
     
@@ -41,13 +42,14 @@ def load_face_database(database_path, max_faces_per_person=5):
         image_files = [f for f in os.listdir(person_path) 
                       if Path(f).suffix.lower() in image_extensions]
         image_files = image_files[:max_faces_per_person]  # Limit for Pi performance
-        
+        print(f"[INFO] Num Image found: {image_files.count}")
         for image_file in image_files:
             image_path = os.path.join(person_path, image_file)
             
             try:
                 # Load and process image
                 img = cv2.imread(image_path)
+                print(f"[INFO] Image found: {image_path}")
                 if img is None:
                     continue
                 
@@ -159,7 +161,7 @@ inserting_loop = False
 auto_loop_enabled = False
 face_detected_counter = 0
 FACE_DETECTION_THRESHOLD = 3  # Reduced for faster response on Pi
-CONFIDENCE_THRESHOLD = 90     # Higher threshold for Pi (more lenient)
+CONFIDENCE_THRESHOLD = 200     # Higher threshold for Pi (more lenient)
 frame_counter = 0
 FACE_RECOGNITION_INTERVAL = 3  # Only do face recognition every 3rd frame
 
