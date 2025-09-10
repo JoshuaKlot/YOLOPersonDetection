@@ -161,7 +161,7 @@ inserting_loop = False
 auto_loop_enabled = False
 face_detected_counter = 0
 FACE_DETECTION_THRESHOLD = 3  # Reduced for faster response on Pi
-CONFIDENCE_THRESHOLD = 200     # Higher threshold for Pi (more lenient)
+CONFIDENCE_THRESHOLD = 120     # Higher threshold for Pi (more lenient)
 frame_counter = 0
 FACE_RECOGNITION_INTERVAL = 3  # Only do face recognition every 3rd frame
 
