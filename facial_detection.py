@@ -149,8 +149,8 @@ print("  SPACE - Start/stop recording")
 print("  L - Play recorded loop manually")
 print("  A - Toggle auto-loop when known face detected")
 print("  S - Show database statistics")
-print("  + - Increase confidence threshold (stricter)")
-print("  - - Decrease confidence threshold (looser)")
+#print("  + - Increase confidence threshold (stricter)")
+#print("  - - Decrease confidence threshold (looser)")
 print("  Q - Quit")
 
 # Variables with Pi optimizations
@@ -161,9 +161,9 @@ inserting_loop = False
 auto_loop_enabled = False
 face_detected_counter = 0
 FACE_DETECTION_THRESHOLD = 3  # Reduced for faster response on Pi
-CONFIDENCE_THRESHOLD = 120     # Higher threshold for Pi (more lenient)
+CONFIDENCE_THRESHOLD = 130     # Higher threshold for Pi (more lenient)
 frame_counter = 0
-FACE_RECOGNITION_INTERVAL = 3  # Only do face recognition every 3rd frame
+FACE_RECOGNITION_INTERVAL = 1  # Only do face recognition every 3rd frame
 
 # Performance monitoring
 last_fps_time = time.time()
@@ -231,18 +231,18 @@ try:
                 face_detected_counter = 0
         
         # Display status with FPS
-        status_text = []
-        status_text.append(f"FPS: {current_fps}")
-        if recording:
-            status_text.append("REC")
-        status_text.append(f"DB: {len(person_names)}")
-        if auto_loop_enabled:
-            status_text.append("AUTO")
-        if inserting_loop:
-            status_text.append("LOOP")
+        # status_text = []
+        # status_text.append(f"FPS: {current_fps}")
+        # if recording:
+        #     status_text.append("REC")
+        # status_text.append(f"DB: {len(person_names)}")
+        # if auto_loop_enabled:
+        #     status_text.append("AUTO")
+        # if inserting_loop:
+        #     status_text.append("LOOP")
             
-        cv2.putText(frame, " | ".join(status_text), (10, 25), 
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
+        # cv2.putText(frame, " | ".join(status_text), (10, 25), 
+        #            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
         
         # Show confidence threshold
         cv2.putText(frame, f"Conf Threshold: {CONFIDENCE_THRESHOLD}", (10, 45), 
