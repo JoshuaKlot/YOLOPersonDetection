@@ -181,7 +181,7 @@ use_augmentation = use_aug != 'n'
 print(f"\n[INFO] Loading database with augmentation {'enabled' if use_augmentation else 'disabled'}...")
 face_recognizer, person_names, database_loaded = load_face_database(
     database_path, 
-    max_faces_per_person=50,
+    max_faces_per_person=200,
     use_augmentation=use_augmentation
 )
 
@@ -191,6 +191,8 @@ if not database_loaded:
 
 # Ask the user for the receiver IP
 RECEIVER_IP = input("\nEnter the receiver IP address: ").strip()
+if not RECEIVER_IP:
+    RECEIVER_IP = "localhost"  # Default path
 RECEIVER_PORT = 9999
 print(f"[INFO] Connecting to receiver at {RECEIVER_IP}:{RECEIVER_PORT}...")
 
