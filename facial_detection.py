@@ -68,7 +68,6 @@ def load_face_database(database_path, max_faces_per_person=10, use_augmentation=
     
     training_faces = []
     training_labels = []
-
     person_names = {}
     label_counter = 0
     
@@ -79,10 +78,8 @@ def load_face_database(database_path, max_faces_per_person=10, use_augmentation=
         print(f"[ERROR] Database path does not exist: {database_path}")
         return None, {}, False
     
-    # Supported image extensions
     image_extensions = {'.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.tif'}
     
-    # Walk through database directory
     for person_folder in os.listdir(database_path):
         person_path = os.path.join(database_path, person_folder)
         
@@ -92,7 +89,6 @@ def load_face_database(database_path, max_faces_per_person=10, use_augmentation=
         person_faces = []
         print(f"[INFO] Processing person: {person_folder}")
         
-        # Load limited number of images per person for performance
         image_files = [f for f in os.listdir(person_path) 
                       if Path(f).suffix.lower() in image_extensions]
         image_files = image_files[:max_faces_per_person]
@@ -102,13 +98,12 @@ def load_face_database(database_path, max_faces_per_person=10, use_augmentation=
             image_path = os.path.join(person_path, image_file)
             
             try:
-                # Load and process image
                 img = cv2.imread(image_path)
                 print(f"[INFO] Processing: {image_path}")
                 if img is None:
                     continue
                 
-                # Resize image if too large (saves processing time)
+                # Resize if too large
                 height, width = img.shape[:2]
                 if width > 640:
                     scale = 640 / width
@@ -171,7 +166,7 @@ def load_face_database(database_path, max_faces_per_person=10, use_augmentation=
 # Get database path from user
 database_path = input("Enter the path to facial database folder: ").strip()
 if not database_path:
-    database_path = "./face_database"  # Default path
+    database_path = "./face_database"
 
 # Ask about augmentation
 use_aug = input("Enable image augmentation for better lighting variations? (Y/n): ").strip().lower()
@@ -263,7 +258,6 @@ try:
             fps_counter = 0
             last_fps_time = time.time()
             
-        # Convert to grayscale for face detection
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         
         # Only do face detection/recognition every few frames
@@ -282,7 +276,7 @@ try:
                 roi_gray = gray[y:y+h, x:x+w]
                 roi_gray = cv2.resize(roi_gray, (80, 80))
                 
-                label, confidence = face_recognizer.predict(roi_gray)
+                label, confidence = face_recognizer.predict(roi_processed)
                 
                 if confidence < CONFIDENCE_THRESHOLD:
                     person_name = person_names.get(label, f"Person_{label}")
@@ -321,6 +315,10 @@ try:
         
         cv2.putText(frame, f"Conf Threshold: {CONFIDENCE_THRESHOLD}", (10, 45), 
                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 0), 1)
+        
+        # Show FPS
+        cv2.putText(frame, f"FPS: {current_fps}", (10, 45), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 255), 1)
         
         key = cv2.waitKey(1) & 0xFF
         cv2.imshow("Sender", frame)
