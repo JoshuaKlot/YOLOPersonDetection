@@ -241,7 +241,7 @@ face_detected_counter = 0
 FACE_DETECTION_THRESHOLD = 3
 CONFIDENCE_THRESHOLD = 120
 frame_counter = 0
-FACE_RECOGNITION_INTERVAL = 3
+FACE_RECOGNITION_INTERVAL = 1
 
 # Performance monitoring
 last_fps_time = time.time()
