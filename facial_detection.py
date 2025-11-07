@@ -7,6 +7,9 @@ import os
 from pathlib import Path
 import threading
 from queue import Queue
+import imagehash
+from PIL import Image
+from collections import deque
 
 def augment_image(img):
     """Generate augmented versions of an image with different lighting and processing"""
@@ -275,6 +278,8 @@ try:
                 
                 roi_gray = gray[y:y+h, x:x+w]
                 roi_gray = cv2.resize(roi_gray, (80, 80))
+                # Apply histogram equalization to normalize lighting
+                roi_processed = cv2.equalizeHist(roi_gray)
                 
                 label, confidence = face_recognizer.predict(roi_processed)
                 
@@ -319,7 +324,14 @@ try:
         # Show FPS
         cv2.putText(frame, f"FPS: {current_fps}", (10, 45), 
                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 255), 1)
-        
+
+        # Prepare display frame: if we are playing back a recorded loop, show the mirrored loop frame
+        display_frame = frame
+        if inserting_loop and recorded_frames:
+            # Safely index current loop frame
+            idx = min(loop_index, len(recorded_frames) - 1)
+            display_frame = cv2.flip(recorded_frames[idx], 1)  # horizontal mirror for display
+
         key = cv2.waitKey(1) & 0xFF
         cv2.imshow("Sender", frame)
         
@@ -368,9 +380,13 @@ try:
         if recording:
             recorded_frames.append(frame.copy())
         
-        # Decide which frame to send
+        # Decide which frame to send. If playing back a recorded loop, send the mirrored (horizontally flipped) frames
         if inserting_loop and recorded_frames:
-            source_frame = recorded_frames[loop_index]
+            # Use current loop index (safe-guard) and create mirrored frame to send
+            idx = min(loop_index, len(recorded_frames) - 1)
+            orig_loop_frame = recorded_frames[idx]
+            source_frame = cv2.flip(orig_loop_frame, 1)  # send mirrored footage when looped
+
             loop_index += 1
             if loop_index >= len(recorded_frames):
                 inserting_loop = False

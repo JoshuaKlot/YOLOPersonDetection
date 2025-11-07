@@ -3,18 +3,44 @@ import threading
 import struct
 import cv2
 import numpy as np
-import hashlib
+import imagehash
+from PIL import Image
+from collections import deque
 
 # Threshold for detecting repeated frames (i.e., looped video)
 REPEAT_THRESHOLD = 5
+HASH_SIMILARITY_THRESHOLD = 5  # Threshold for image hash differences
 
 # Load YOLO classes from coco.names
 with open("coco.names", "r") as f:
     classes = [line.strip() for line in f.readlines()]
 
-# Computes MD5 hash of frame data to detect duplicates
-def compute_hash(data):
-    return hashlib.md5(data).hexdigest()
+class FrameHashTracker:
+    def __init__(self, max_history=50, hash_size=8):
+        self.hash_history = deque(maxlen=max_history)
+        self.hash_size = hash_size
+
+    def compute_hash(self, frame):
+        # Convert BGR to RGB and then to PIL Image
+        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        pil_image = Image.fromarray(rgb_frame)
+        # Compute both average and perceptual hash for better similarity detection
+        avg_hash = imagehash.average_hash(pil_image, hash_size=self.hash_size)
+        phash = imagehash.phash(pil_image, hash_size=self.hash_size)
+        return avg_hash, phash
+
+    def is_frame_unique(self, frame):
+        current_avg_hash, current_phash = self.compute_hash(frame)
+        
+        for avg_hash, phash in self.hash_history:
+            # Check both normal and flipped similarity using both hash types
+            if (current_avg_hash - avg_hash <= HASH_SIMILARITY_THRESHOLD or
+                current_phash - phash <= HASH_SIMILARITY_THRESHOLD):
+                return False
+        
+        # Store both hashes
+        self.hash_history.append((current_avg_hash, current_phash))
+        return True
 
 # def apply_yolo(frame):
 #     height, width = frame.shape[:2]
@@ -47,7 +73,8 @@ def handle_client(conn, addr, window_id):
     # Wrap socket in a file-like object for easier binary reading
     conn_file = conn.makefile('rb')
     
-    # Each client (camera stream) gets its own set of seen hashes
+    # Initialize frame hash tracker for this client
+    frame_tracker = FrameHashTracker(max_history=50, hash_size=8)
     seen_hashes = set()
     repeat_count = 0
 
@@ -64,14 +91,16 @@ def handle_client(conn, addr, window_id):
 
             # Read the actual frame data
             frame_data = conn_file.read(frame_size)
-            frame_hash = compute_hash(frame_data)
-
-            # Check if this frame is a repeat (based on hash)
-            if frame_hash in seen_hashes:
-                repeat_count += 1
-            else:
-                seen_hashes.add(frame_hash)
+            
+            # Convert frame data to numpy array
+            frame_array = np.frombuffer(frame_data, dtype=np.uint8)
+            frame = cv2.imdecode(frame_array, cv2.IMREAD_COLOR)
+            
+            # Check if this frame is unique (not a repeat, mirror, or modified version)
+            if frame_tracker.is_frame_unique(frame):
                 repeat_count = 0
+            else:
+                repeat_count += 1
 
             # Decode image data to OpenCV frame
             frame = cv2.imdecode(np.frombuffer(frame_data, np.uint8), cv2.IMREAD_COLOR)
