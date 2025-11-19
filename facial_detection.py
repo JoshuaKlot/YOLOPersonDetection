@@ -10,6 +10,7 @@ from queue import Queue
 import imagehash
 from PIL import Image
 from collections import deque
+from datetime import datetime
 
 def augment_image(img):
     """Generate augmented versions of an image with different lighting and processing"""
@@ -166,6 +167,48 @@ def load_face_database(database_path, max_faces_per_person=10, use_augmentation=
         print(f"[ERROR] Training failed: {e}")
         return None, {}, False
 
+def encode_timestamp_colors(timestamp_str):
+    """Encode timestamp as color bars. Each digit gets a unique color.
+    Returns list of BGR colors for each character in timestamp.
+    Format: 'YYYY-MM-DD HH:MM:SS' (19 characters)
+    """
+    # Define distinct colors for digits 0-9 and separators
+    color_map = {
+        '0': (255, 0, 0),      # Blue
+        '1': (0, 255, 0),      # Green
+        '2': (0, 0, 255),      # Red
+        '3': (255, 255, 0),    # Cyan
+        '4': (255, 0, 255),    # Magenta
+        '5': (0, 255, 255),    # Yellow
+        '6': (128, 0, 255),    # Purple
+        '7': (255, 128, 0),    # Orange
+        '8': (0, 128, 255),    # Light Blue
+        '9': (128, 255, 0),    # Lime
+        '-': (255, 255, 255),  # White
+        ' ': (128, 128, 128),  # Gray
+        ':': (200, 200, 200),  # Light Gray
+    }
+    
+    colors = []
+    for char in timestamp_str:
+        colors.append(color_map.get(char, (0, 0, 0)))
+    return colors
+
+def draw_color_timestamp(frame, timestamp_str, start_x=10, start_y=10, bar_width=10, bar_height=15):
+    """Draw color-encoded timestamp on frame as vertical bars"""
+    colors = encode_timestamp_colors(timestamp_str)
+    
+    for i, color in enumerate(colors):
+        x1 = start_x + i * bar_width
+        x2 = x1 + bar_width
+        y1 = start_y
+        y2 = start_y + bar_height
+        cv2.rectangle(frame, (x1, y1), (x2, y2), color, -1)  # Filled rectangle
+    
+    # Add text timestamp below for human readability
+    cv2.putText(frame, timestamp_str, (start_x, start_y + bar_height + 15), 
+                cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
+
 # Get database path from user
 database_path = input("Enter the path to facial database folder: ").strip()
 if not database_path:
@@ -190,7 +233,7 @@ if not database_loaded:
 # Ask the user for the receiver IP
 RECEIVER_IP = input("\nEnter the receiver IP address: ").strip()
 if not RECEIVER_IP:
-    RECEIVER_IP = "localhost"  # Default path
+    RECEIVER_IP = "localhost"
 RECEIVER_PORT = 9999
 print(f"[INFO] Connecting to receiver at {RECEIVER_IP}:{RECEIVER_PORT}...")
 
@@ -220,6 +263,7 @@ print("  - Lower FPS: 15")
 print("  - Face recognition every 3rd frame")
 if use_augmentation:
     print("  - Image augmentation: 8x samples per face (lighting variations)")
+print("  - Color-encoded timestamp for tamper detection")
 print("\n[INFO] Controls:")
 print("  SPACE - Start/stop recording")
 print("  L - Play recorded loop manually")
@@ -315,25 +359,21 @@ try:
         if inserting_loop:
             status_text.append("LOOP")
             
-        cv2.putText(frame, " | ".join(status_text), (10, 25), 
+        cv2.putText(frame, " | ".join(status_text), (10, 50), 
                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
         
-        cv2.putText(frame, f"Conf Threshold: {CONFIDENCE_THRESHOLD}", (10, 45), 
+        cv2.putText(frame, f"Conf Threshold: {CONFIDENCE_THRESHOLD}", (10, 70), 
                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 0), 1)
-        
-        # Show FPS
-        cv2.putText(frame, f"FPS: {current_fps}", (10, 45), 
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 255), 1)
-
-        # Prepare display frame: if we are playing back a recorded loop, show the mirrored loop frame
+        draw_color_timestamp(frame, datetime.now().strftime('%Y-%m-%d %H:%M:%S'), start_x=10, start_y=10, bar_width=10, bar_height=15)
+        # Prepare display frame
         display_frame = frame
+        
         if inserting_loop and recorded_frames:
-            # Safely index current loop frame
             idx = min(loop_index, len(recorded_frames) - 1)
-            display_frame = cv2.flip(recorded_frames[idx], 1)  # horizontal mirror for display
+            display_frame = cv2.flip(recorded_frames[idx], 1)
 
-        key = cv2.waitKey(1) & 0xFF
         cv2.imshow("Sender", frame)
+        key = cv2.waitKey(1) & 0xFF
         
         # Handle keyboard input
         if key == ord(' '):
@@ -380,19 +420,21 @@ try:
         if recording:
             recorded_frames.append(frame.copy())
         
-        # Decide which frame to send. If playing back a recorded loop, send the mirrored (horizontally flipped) frames
+        # Decide which frame to send
         if inserting_loop and recorded_frames:
-            # Use current loop index (safe-guard) and create mirrored frame to send
             idx = min(loop_index, len(recorded_frames) - 1)
             orig_loop_frame = recorded_frames[idx]
-            source_frame = cv2.flip(orig_loop_frame, 1)  # send mirrored footage when looped
-
+            source_frame = cv2.flip(orig_loop_frame, 1)
             loop_index += 1
             if loop_index >= len(recorded_frames):
                 inserting_loop = False
                 print("[INFO] Loop playback finished. Returning to live feed.")
         else:
-            source_frame = frame
+            source_frame = frame.copy()
+        
+        # Draw color-encoded timestamp on the frame to be sent
+        ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        
         
         # Encode and send the frame
         result, encoded = cv2.imencode('.jpg', source_frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
