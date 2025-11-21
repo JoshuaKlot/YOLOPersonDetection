@@ -259,9 +259,7 @@ def handle_client(conn, addr, window_id):
             key = cv2.waitKey(1) & 0xFF
             if key == ord('q'):
                 break
-            elif key == ord('m'):
-                mirror_stream = not mirror_stream
-                print(f"[INFO] {addr} - Mirror stream {'ON' if mirror_stream else 'OFF'}")
+
 
     except Exception as e:
         print(f"[ERROR] {addr} - {e}")

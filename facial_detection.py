@@ -269,11 +269,13 @@ print("  SPACE - Start/stop recording")
 print("  L - Play recorded loop manually")
 print("  A - Toggle auto-loop when known face detected")
 print("  S - Show database statistics")
+print("  M - Mirror the stream during loop playback")
 print("  + - Increase confidence threshold (stricter)")
 print("  - - Decrease confidence threshold (looser)")
 print("  Q - Quit")
 
 # Variables
+mirror_stream = False
 recording = False
 recorded_frames = []
 loop_index = 0
@@ -415,7 +417,9 @@ try:
             
         elif key == ord('q'):
             break
-        
+        elif key == ord('m'):
+            mirror_stream = not mirror_stream
+            print(f"[INFO] Mirror stream during loop playback {'enabled' if mirror_stream else 'disabled'}")
         # Record live frames if recording is on
         if recording:
             recorded_frames.append(frame.copy())
@@ -424,7 +428,10 @@ try:
         if inserting_loop and recorded_frames:
             idx = min(loop_index, len(recorded_frames) - 1)
             orig_loop_frame = recorded_frames[idx]
-            source_frame = cv2.flip(orig_loop_frame, 1)
+            if mirror_stream:
+                source_frame = cv2.flip(orig_loop_frame, 1)
+            else:
+                source_frame = orig_loop_frame
             loop_index += 1
             if loop_index >= len(recorded_frames):
                 inserting_loop = False
