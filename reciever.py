@@ -249,13 +249,13 @@ def handle_client(conn, addr, window_id):
                 if status == 'valid':
                     valid_timestamp_count += 1
                     last_valid_timestamp = decoded_ts
-                    cv2.putText(frame, f"✓ {decoded_ts} ({abs(time_diff):.1f}s)", 
+                    cv2.putText(frame, f"{decoded_ts} ({abs(time_diff):.1f}s)", 
                                (20, frame.shape[0] - 80),
                                cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 0), 1)
                 
                 elif status == 'warning':
                     warning_count += 1
-                    cv2.putText(frame, f"⚠ {message}", 
+                    cv2.putText(frame, f"{message}", 
                                (20, frame.shape[0] - 80),
                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 165, 255), 2)
                     print(f"[WARN] {addr} - {message}")
@@ -266,7 +266,7 @@ def handle_client(conn, addr, window_id):
                 
                 elif status == 'tampered':
                     tamper_count += 1
-                    cv2.putText(frame, f"✗ {message}", 
+                    cv2.putText(frame, f"{message}", 
                                (20, frame.shape[0] - 80),
                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
                     print(f"[ALERT] {addr} - {message}")
@@ -277,12 +277,12 @@ def handle_client(conn, addr, window_id):
                 
                 else:  # error
                     decode_fail_count += 1
-                    cv2.putText(frame, f"✗ {message}", 
+                    cv2.putText(frame, f"{message}", 
                                (20, frame.shape[0] - 80),
                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
             else:
                 decode_fail_count += 1
-                cv2.putText(frame, "✗ Cannot decode timestamp (possible tampering)", 
+                cv2.putText(frame, "Cannot decode timestamp (possible tampering)", 
                            (20, frame.shape[0] - 80),
                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
                 print(f"[WARN] {addr} - Failed to decode steganographic timestamp")
@@ -291,11 +291,11 @@ def handle_client(conn, addr, window_id):
                 cv2.rectangle(frame, (0, 0), (frame.shape[1]-1, frame.shape[0]-1), 
                              (0, 0, 255), 3)
 
-            # Loop detection overlay
-            if repeat_count >= REPEAT_THRESHOLD:
-                cv2.putText(frame, "⟲ LOOP DETECTED", (20, 40),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
-                print(f"[ALERT] {addr} - Loop detected in video stream")
+            # # Loop detection overlay
+            # if repeat_count >= REPEAT_THRESHOLD:
+            #     cv2.putText(frame, "LOOP DETECTED", (20, 40),
+            #                 cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+            #     print(f"[ALERT] {addr} - Loop detected in video stream")
 
             # Apply mirror toggle if enabled
             if mirror_stream:
