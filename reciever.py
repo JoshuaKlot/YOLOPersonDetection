@@ -298,10 +298,10 @@ def handle_client(conn, addr, window_id):
             #     print(f"[ALERT] {addr} - Loop detected in video stream")
 
             # Apply mirror toggle if enabled
-            if mirror_stream:
-                frame = cv2.flip(frame, 1)
-                cv2.putText(frame, "MIRROR", (frame.shape[1]-110, 30),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+            # if mirror_stream:
+            #     frame = cv2.flip(frame, 1)
+            #     cv2.putText(frame, "MIRROR", (frame.shape[1]-110, 30),
+            #                 cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
 
             # Show comprehensive statistics
             stats_y = frame.shape[0] - 50
@@ -321,9 +321,9 @@ def handle_client(conn, addr, window_id):
             key = cv2.waitKey(1) & 0xFF
             if key == ord('q'):
                 break
-            elif key == ord('m'):
-                mirror_stream = not mirror_stream
-                print(f"[INFO] {addr} - Mirror {'enabled' if mirror_stream else 'disabled'}")
+            # elif key == ord('m'):
+            #     mirror_stream = not mirror_stream
+            #     print(f"[INFO] {addr} - Mirror {'enabled' if mirror_stream else 'disabled'}")
             elif key == ord('s'):
                 # Print statistics
                 print(f"\n[STATS] {addr} Statistics:")
