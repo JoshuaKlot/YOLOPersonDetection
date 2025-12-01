@@ -12,6 +12,63 @@ from PIL import Image
 from collections import deque
 from datetime import datetime
 
+def encode_timestamp_steganography(frame, timestamp_str):
+    """
+    Encode timestamp into the least significant bits of pixel values.
+    Uses a distributed pattern across the image for robustness.
+    """
+    # Convert timestamp to binary
+    timestamp_bytes = timestamp_str.encode('utf-8')
+    timestamp_bits = ''.join(format(byte, '08b') for byte in timestamp_bytes)
+    
+    # Add length header (16 bits for string length)
+    length_bits = format(len(timestamp_str), '016b')
+    full_message = length_bits + timestamp_bits
+    
+    # Calculate positions to modify (deterministic pattern)
+    height, width, channels = frame.shape
+    total_pixels = height * width * channels
+    
+    if len(full_message) > total_pixels:
+        raise ValueError("Frame too small to encode timestamp")
+    
+    # Create a copy to avoid modifying original
+    encoded_frame = frame.copy()
+    
+    # Encode bits into LSB of pixels
+    # Use a pseudo-random but deterministic pattern for pixel selection
+    np.random.seed(42)  # Fixed seed for reproducibility
+    pixel_positions = np.random.permutation(total_pixels)[:len(full_message)]
+    
+    bit_index = 0
+    for pos in pixel_positions:
+        # Convert flat position to (row, col, channel)
+        channel = int(pos % channels)
+        pixel_pos = int(pos // channels)
+        row = int(pixel_pos // width)
+        col = int(pixel_pos % width)
+        
+        # Bounds check
+        if row >= height or col >= width or channel >= channels:
+            continue
+        
+        # Get current pixel value
+        pixel_val = int(encoded_frame[row, col, channel])
+        
+        # Replace LSB with message bit
+        if full_message[bit_index] == '1':
+            new_val = pixel_val | 1  # Set LSB to 1
+        else:
+            new_val = pixel_val & ~1  # Set LSB to 0
+        
+        # Ensure value is in valid range
+        new_val = max(0, min(255, new_val))
+        encoded_frame[row, col, channel] = np.uint8(new_val)
+        
+        bit_index += 1
+    
+    return encoded_frame
+
 def augment_image(img):
     """Generate augmented versions of an image with different lighting and processing"""
     augmented_images = []
@@ -167,48 +224,6 @@ def load_face_database(database_path, max_faces_per_person=10, use_augmentation=
         print(f"[ERROR] Training failed: {e}")
         return None, {}, False
 
-def encode_timestamp_colors(timestamp_str):
-    """Encode timestamp as color bars. Each digit gets a unique color.
-    Returns list of BGR colors for each character in timestamp.
-    Format: 'YYYY-MM-DD HH:MM:SS' (19 characters)
-    """
-    # Define distinct colors for digits 0-9 and separators
-    color_map = {
-        '0': (255, 0, 0),      # Blue
-        '1': (0, 255, 0),      # Green
-        '2': (0, 0, 255),      # Red
-        '3': (255, 255, 0),    # Cyan
-        '4': (255, 0, 255),    # Magenta
-        '5': (0, 255, 255),    # Yellow
-        '6': (128, 0, 255),    # Purple
-        '7': (255, 128, 0),    # Orange
-        '8': (0, 128, 255),    # Light Blue
-        '9': (128, 255, 0),    # Lime
-        '-': (255, 255, 255),  # White
-        ' ': (128, 128, 128),  # Gray
-        ':': (200, 200, 200),  # Light Gray
-    }
-    
-    colors = []
-    for char in timestamp_str:
-        colors.append(color_map.get(char, (0, 0, 0)))
-    return colors
-
-def draw_color_timestamp(frame, timestamp_str, start_x=10, start_y=10, bar_width=10, bar_height=15):
-    """Draw color-encoded timestamp on frame as vertical bars"""
-    colors = encode_timestamp_colors(timestamp_str)
-    
-    for i, color in enumerate(colors):
-        x1 = start_x + i * bar_width
-        x2 = x1 + bar_width
-        y1 = start_y
-        y2 = start_y + bar_height
-        cv2.rectangle(frame, (x1, y1), (x2, y2), color, -1)  # Filled rectangle
-    
-    # Add text timestamp below for human readability
-    cv2.putText(frame, timestamp_str, (start_x, start_y + bar_height + 15), 
-                cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
-
 # Get database path from user
 database_path = input("Enter the path to facial database folder: ").strip()
 if not database_path:
@@ -260,10 +275,11 @@ print("\n[INFO] Loaded people in database:", list(person_names.values()))
 print("\n[INFO] Pi Optimizations active:")
 print("  - Reduced resolution: 480x360")
 print("  - Lower FPS: 15")
-print("  - Face recognition every 3rd frame")
+print("  - Face recognition every frame")
 if use_augmentation:
     print("  - Image augmentation: 8x samples per face (lighting variations)")
-print("  - Color-encoded timestamp for tamper detection")
+print("  - Steganographic timestamp encoding (invisible, tamper-evident)")
+print("  - PNG encoding for lossless timestamp preservation")
 print("\n[INFO] Controls:")
 print("  SPACE - Start/stop recording")
 print("  L - Play recorded loop manually")
@@ -361,18 +377,14 @@ try:
         if inserting_loop:
             status_text.append("LOOP")
             
-        cv2.putText(frame, " | ".join(status_text), (10, 50), 
+        cv2.putText(frame, " | ".join(status_text), (10, 30), 
                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
         
-        cv2.putText(frame, f"Conf Threshold: {CONFIDENCE_THRESHOLD}", (10, 70), 
+        cv2.putText(frame, f"Conf Threshold: {CONFIDENCE_THRESHOLD}", (10, 50), 
                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 0), 1)
-        draw_color_timestamp(frame, datetime.now().strftime('%Y-%m-%d %H:%M:%S'), start_x=10, start_y=10, bar_width=10, bar_height=15)
-        # Prepare display frame
-        display_frame = frame
         
-        if inserting_loop and recorded_frames:
-            idx = min(loop_index, len(recorded_frames) - 1)
-            display_frame = cv2.flip(recorded_frames[idx], 1)
+        cv2.putText(frame, "Stego TS: ON", (10, 70), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 0), 1)
 
         cv2.imshow("Sender", frame)
         key = cv2.waitKey(1) & 0xFF
@@ -420,6 +432,13 @@ try:
         elif key == ord('m'):
             mirror_stream = not mirror_stream
             print(f"[INFO] Mirror stream during loop playback {'enabled' if mirror_stream else 'disabled'}")
+        # Encode steganographic timestamp on the frame to be sent
+        ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        try:
+            frame = encode_timestamp_steganography(frame, ts)
+        except Exception as e:
+            print(f"[WARNING] Failed to encode timestamp: {e}")
+        
         # Record live frames if recording is on
         if recording:
             recorded_frames.append(frame.copy())
@@ -431,7 +450,7 @@ try:
             if mirror_stream:
                 source_frame = cv2.flip(orig_loop_frame, 1)
             else:
-                source_frame = orig_loop_frame
+                source_frame = orig_loop_frame.copy()
             loop_index += 1
             if loop_index >= len(recorded_frames):
                 inserting_loop = False
@@ -439,12 +458,10 @@ try:
         else:
             source_frame = frame.copy()
         
-        # Draw color-encoded timestamp on the frame to be sent
-        ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        
-        
-        # Encode and send the frame
-        result, encoded = cv2.imencode('.jpg', source_frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+
+        # Encode and send the frame using PNG for lossless compression
+        # This preserves the LSB data for timestamp verification
+        result, encoded = cv2.imencode('.png', source_frame)
         frame_bytes = encoded.tobytes()
         conn_file.write(struct.pack('<L', len(frame_bytes)))
         conn_file.write(frame_bytes)
@@ -457,6 +474,8 @@ try:
     
 except Exception as e:
     print(f"[ERROR] {e}")
+    import traceback
+    traceback.print_exc()
 finally:
     cam.release()
     cv2.destroyAllWindows()

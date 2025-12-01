@@ -13,12 +13,9 @@ from datetime import datetime, timedelta
 REPEAT_THRESHOLD = 5
 HASH_SIMILARITY_THRESHOLD = 5
 
-# Color timestamp settings
-TIMESTAMP_START_X = 10
-TIMESTAMP_START_Y = 10
-TIMESTAMP_BAR_WIDTH = 10
-TIMESTAMP_BAR_HEIGHT = 15
-TIMESTAMP_TOLERANCE_SECONDS = 3
+# Timestamp verification settings
+TIMESTAMP_TOLERANCE_SECONDS = 3  # Allow up to 3 seconds difference
+TIMESTAMP_WARNING_SECONDS = 10   # Warn if difference is significant
 
 # Load YOLO classes from coco.names (if needed)
 try:
@@ -26,6 +23,95 @@ try:
         classes = [line.strip() for line in f.readlines()]
 except:
     classes = []
+
+def decode_timestamp_steganography(frame):
+    """
+    Decode timestamp from the least significant bits of pixel values.
+    
+    Args:
+        frame: BGR image with encoded timestamp
+    
+    Returns:
+        Decoded timestamp string or None if decoding fails
+    """
+    try:
+        height, width, channels = frame.shape
+        
+        # Use same deterministic pattern as encoding
+        np.random.seed(42)
+        total_pixels = height * width * channels
+        
+        # First, read the length (16 bits)
+        pixel_positions = np.random.permutation(total_pixels)
+        
+        length_bits = ''
+        for i in range(16):
+            pos = pixel_positions[i]
+            channel = pos % channels
+            pixel_pos = pos // channels
+            row = pixel_pos // width
+            col = pixel_pos % width
+            
+            # Extract LSB
+            pixel_val = frame[row, col, channel]
+            length_bits += str(pixel_val & 1)
+        
+        # Convert length from binary
+        message_length = int(length_bits, 2)
+        
+        if message_length <= 0 or message_length > 100:  # Sanity check
+            return None
+        
+        # Read the message bits
+        message_bits = ''
+        for i in range(16, 16 + message_length * 8):
+            pos = pixel_positions[i]
+            channel = pos % channels
+            pixel_pos = pos // channels
+            row = pixel_pos // width
+            col = pixel_pos % width
+            
+            pixel_val = frame[row, col, channel]
+            message_bits += str(pixel_val & 1)
+        
+        # Convert bits to bytes
+        timestamp_bytes = bytearray()
+        for i in range(0, len(message_bits), 8):
+            byte = message_bits[i:i+8]
+            timestamp_bytes.append(int(byte, 2))
+        
+        return timestamp_bytes.decode('utf-8')
+    except Exception as e:
+        return None
+
+def verify_timestamp(timestamp_str, tolerance_seconds=3, warning_seconds=10):
+    """
+    Check if decoded timestamp is close to current time.
+    
+    Returns:
+        (status, diff_seconds, message)
+        status: 'valid', 'warning', 'tampered', or 'error'
+    """
+    try:
+        ts = datetime.strptime(timestamp_str, '%Y-%m-%d %H:%M:%S')
+        now = datetime.now()
+        diff = (now - ts).total_seconds()  # Positive if timestamp is in the past
+        abs_diff = abs(diff)
+        
+        if abs_diff <= tolerance_seconds:
+            return 'valid', diff, f"Timestamp OK ({abs_diff:.1f}s)"
+        elif abs_diff <= warning_seconds:
+            if diff > 0:
+                return 'warning', diff, f"WARNING: Timestamp {abs_diff:.1f}s OLD"
+            else:
+                return 'warning', diff, f"WARNING: Timestamp {abs_diff:.1f}s in FUTURE"
+        else:
+            if diff > 0:
+                return 'tampered', diff, f"TAMPERED: Timestamp {abs_diff:.1f}s OLD (possible replay attack)"
+            else:
+                return 'tampered', diff, f"TAMPERED: Timestamp {abs_diff:.1f}s in FUTURE"
+    except Exception as e:
+        return 'error', None, f"Invalid timestamp format: {timestamp_str}"
 
 class SequenceLoopDetector:
     """Detect repeated (looped) footage by fingerprinting short sequences"""
@@ -105,89 +191,26 @@ class SequenceLoopDetector:
 
         return detected, info
 
-def decode_color_timestamp(frame, start_x=10, start_y=10, bar_width=10, bar_height=15, num_chars=19):
-    """Extract color-encoded timestamp from frame.
-    Returns decoded timestamp string or None if extraction fails.
-    """
-    # Define the same color map used for encoding
-    color_map = {
-        '0': (255, 0, 0),      # Blue
-        '1': (0, 255, 0),      # Green
-        '2': (0, 0, 255),      # Red
-        '3': (255, 255, 0),    # Cyan
-        '4': (255, 0, 255),    # Magenta
-        '5': (0, 255, 255),    # Yellow
-        '6': (128, 0, 255),    # Purple
-        '7': (255, 128, 0),    # Orange
-        '8': (0, 128, 255),    # Light Blue
-        '9': (128, 255, 0),    # Lime
-        '-': (255, 255, 255),  # White
-        ' ': (128, 128, 128),  # Gray
-        ':': (200, 200, 200),  # Light Gray
-    }
-    
-    # Invert the map for decoding
-    reverse_map = {v: k for k, v in color_map.items()}
-    
-    decoded_chars = []
-    
-    for i in range(num_chars):
-        x1 = start_x + i * bar_width
-        x2 = x1 + bar_width
-        y1 = start_y
-        y2 = start_y + bar_height
-        
-        # Check bounds
-        if x2 >= frame.shape[1] or y2 >= frame.shape[0]:
-            return None
-        
-        # Extract the color bar region
-        roi = frame[y1:y2, x1:x2]
-        
-        # Get average color in the region
-        avg_color = cv2.mean(roi)[:3]  # BGR
-        avg_color = (int(avg_color[0]), int(avg_color[1]), int(avg_color[2]))
-        
-        # Find closest matching color with tolerance
-        best_match = None
-        best_distance = float('inf')
-        
-        for target_color, char in reverse_map.items():
-            # Calculate Euclidean distance in color space
-            distance = sum((a - b) ** 2 for a, b in zip(avg_color, target_color)) ** 0.5
-            if distance < best_distance:
-                best_distance = distance
-                best_match = char
-        
-        # If color is too far from any expected color, fail
-        if best_distance > 50:  # Tolerance threshold
-            return None
-        
-        decoded_chars.append(best_match)
-    
-    return ''.join(decoded_chars)
-
-def verify_timestamp(timestamp_str, tolerance_seconds=3):
-    """Check if decoded timestamp is close to current time"""
-    try:
-        ts = datetime.strptime(timestamp_str, '%Y-%m-%d %H:%M:%S')
-        now = datetime.now()
-        diff = abs((ts - now).total_seconds())
-        return diff <= tolerance_seconds, diff
-    except:
-        return False, None
-
 def handle_client(conn, addr, window_id):
     print(f"[INFO] Connected to sender at {addr}")
     
     conn_file = conn.makefile('rb')
-    # Loop detection disabled (SequenceLoopDetector instantiation commented out)
-    # detector = SequenceLoopDetector(window_size=8, hash_size=8, repeat_threshold=3, interval_tolerance=2)
+    # Loop detection (optional - can be enabled/disabled)
+    detector = SequenceLoopDetector(window_size=8, hash_size=8, repeat_threshold=3, interval_tolerance=2)
     repeat_count = 0
+    
+    # Timestamp tracking
     tamper_count = 0
+    warning_count = 0
     valid_timestamp_count = 0
+    decode_fail_count = 0
+    
     # Per-connection mirror toggle (press 'm' to toggle)
     mirror_stream = False
+    
+    # Statistics
+    total_frames = 0
+    last_valid_timestamp = None
 
     try:
         while True:
@@ -203,44 +226,76 @@ def handle_client(conn, addr, window_id):
             frame = cv2.imdecode(np.frombuffer(frame_data, np.uint8), cv2.IMREAD_COLOR)
             if frame is None:
                 continue
-
-            # Loop detection disabled
-            # loop_detected, info = detector.add_frame(frame)
-            # if loop_detected:
-            #     repeat_count += 1
-            # else:
-            #     repeat_count = 0
-
-            # Decode color timestamp
-            decoded_ts = decode_color_timestamp(frame, TIMESTAMP_START_X, TIMESTAMP_START_Y, 
-                                                TIMESTAMP_BAR_WIDTH, TIMESTAMP_BAR_HEIGHT)
             
-            timestamp_valid = False
-            if decoded_ts:
-                is_valid, time_diff = verify_timestamp(decoded_ts, TIMESTAMP_TOLERANCE_SECONDS)
-                if is_valid:
-                    timestamp_valid = True
-                    valid_timestamp_count += 1
-                    cv2.putText(frame, f"TS OK: {decoded_ts} ({time_diff:.1f}s diff)", 
-                               (20, frame.shape[0] - 60),
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
-                else:
-                    tamper_count += 1
-                    cv2.putText(frame, f"TAMPERED: Old timestamp {decoded_ts} ({time_diff:.1f}s diff)", 
-                               (20, frame.shape[0] - 60),
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
-                    print(f"[WARN] {addr} - Timestamp out of range: {decoded_ts} (diff: {time_diff:.1f}s)")
-            else:
-                tamper_count += 1
-                cv2.putText(frame, "TAMPERED: Cannot decode timestamp", 
-                           (20, frame.shape[0] - 60),
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
-                print(f"[WARN] {addr} - Failed to decode color timestamp")
+            total_frames += 1
 
-            # Loop detection overlay disabled
-            # if repeat_count >= REPEAT_THRESHOLD:
-            #     cv2.putText(frame, "Loop Detected", (20, 40),
-            #                 cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 255), 2)
+            # Optional: Loop detection
+            loop_detected, info = detector.add_frame(frame)
+            if loop_detected:
+                repeat_count += 1
+            else:
+                repeat_count = 0
+
+            # Decode steganographic timestamp
+            decoded_ts = decode_timestamp_steganography(frame)
+            
+            if decoded_ts:
+                status, time_diff, message = verify_timestamp(
+                    decoded_ts, 
+                    TIMESTAMP_TOLERANCE_SECONDS, 
+                    TIMESTAMP_WARNING_SECONDS
+                )
+                
+                if status == 'valid':
+                    valid_timestamp_count += 1
+                    last_valid_timestamp = decoded_ts
+                    cv2.putText(frame, f"✓ {decoded_ts} ({abs(time_diff):.1f}s)", 
+                               (20, frame.shape[0] - 80),
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 0), 1)
+                
+                elif status == 'warning':
+                    warning_count += 1
+                    cv2.putText(frame, f"⚠ {message}", 
+                               (20, frame.shape[0] - 80),
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 165, 255), 2)
+                    print(f"[WARN] {addr} - {message}")
+                    
+                    # Draw warning border
+                    cv2.rectangle(frame, (0, 0), (frame.shape[1]-1, frame.shape[0]-1), 
+                                 (0, 165, 255), 3)
+                
+                elif status == 'tampered':
+                    tamper_count += 1
+                    cv2.putText(frame, f"✗ {message}", 
+                               (20, frame.shape[0] - 80),
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+                    print(f"[ALERT] {addr} - {message}")
+                    
+                    # Draw red border for tamper alert
+                    cv2.rectangle(frame, (0, 0), (frame.shape[1]-1, frame.shape[0]-1), 
+                                 (0, 0, 255), 5)
+                
+                else:  # error
+                    decode_fail_count += 1
+                    cv2.putText(frame, f"✗ {message}", 
+                               (20, frame.shape[0] - 80),
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
+            else:
+                decode_fail_count += 1
+                cv2.putText(frame, "✗ Cannot decode timestamp (possible tampering)", 
+                           (20, frame.shape[0] - 80),
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+                print(f"[WARN] {addr} - Failed to decode steganographic timestamp")
+                
+                # Draw red border
+                cv2.rectangle(frame, (0, 0), (frame.shape[1]-1, frame.shape[0]-1), 
+                             (0, 0, 255), 3)
+
+            # Loop detection overlay
+            if repeat_count >= REPEAT_THRESHOLD:
+                cv2.putText(frame, "⟲ LOOP DETECTED", (20, 40),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+                print(f"[ALERT] {addr} - Loop detected in video stream")
 
             # Apply mirror toggle if enabled
             if mirror_stream:
@@ -248,10 +303,17 @@ def handle_client(conn, addr, window_id):
                 cv2.putText(frame, "MIRROR", (frame.shape[1]-110, 30),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
 
-            # Show statistics
-            cv2.putText(frame, f"Valid: {valid_timestamp_count} | Tampered: {tamper_count}", 
-                       (20, frame.shape[0] - 30),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
+            # Show comprehensive statistics
+            stats_y = frame.shape[0] - 50
+            cv2.putText(frame, f"Frames: {total_frames} | Valid: {valid_timestamp_count} | Warn: {warning_count} | Tamper: {tamper_count} | Fail: {decode_fail_count}", 
+                       (20, stats_y),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 0), 1)
+            
+            # Show current system time for reference
+            current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            cv2.putText(frame, f"System Time: {current_time}", 
+                       (20, stats_y + 20),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.4, (200, 200, 200), 1)
 
             # Display the video frame
             cv2.imshow(f"Stream from {addr[0]}:{addr[1]}", frame)
@@ -259,7 +321,19 @@ def handle_client(conn, addr, window_id):
             key = cv2.waitKey(1) & 0xFF
             if key == ord('q'):
                 break
-
+            elif key == ord('m'):
+                mirror_stream = not mirror_stream
+                print(f"[INFO] {addr} - Mirror {'enabled' if mirror_stream else 'disabled'}")
+            elif key == ord('s'):
+                # Print statistics
+                print(f"\n[STATS] {addr} Statistics:")
+                print(f"  Total frames: {total_frames}")
+                print(f"  Valid timestamps: {valid_timestamp_count} ({100*valid_timestamp_count/max(1,total_frames):.1f}%)")
+                print(f"  Warnings: {warning_count} ({100*warning_count/max(1,total_frames):.1f}%)")
+                print(f"  Tampered: {tamper_count} ({100*tamper_count/max(1,total_frames):.1f}%)")
+                print(f"  Decode failures: {decode_fail_count} ({100*decode_fail_count/max(1,total_frames):.1f}%)")
+                if last_valid_timestamp:
+                    print(f"  Last valid timestamp: {last_valid_timestamp}")
 
     except Exception as e:
         print(f"[ERROR] {addr} - {e}")
@@ -267,13 +341,20 @@ def handle_client(conn, addr, window_id):
         conn_file.close()
         conn.close()
         cv2.destroyWindow(f"Stream from {addr[0]}:{addr[1]}")
+        print(f"[INFO] {addr} - Connection closed")
 
 # Main server setup
 server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 server_socket.bind(('0.0.0.0', 9999))  # Listen on all network interfaces
 server_socket.listen(5)  # Allow up to 5 pending connections
 print("[INFO] Receiver server started, waiting for senders...")
-print("[INFO] Color-encoded timestamp detection enabled")
+print("[INFO] Steganographic timestamp detection enabled")
+print(f"[INFO] Timestamp tolerance: {TIMESTAMP_TOLERANCE_SECONDS}s (valid)")
+print(f"[INFO] Warning threshold: {TIMESTAMP_WARNING_SECONDS}s (suspicious)")
+print("\n[INFO] Controls:")
+print("  Q - Quit stream")
+print("  M - Toggle mirror mode")
+print("  S - Show detailed statistics")
 
 window_counter = 0
 
@@ -283,7 +364,7 @@ try:
         threading.Thread(target=handle_client, args=(conn, addr, window_counter), daemon=True).start()
         window_counter += 1
 except KeyboardInterrupt:
-    print("[INFO] Shutting down server.")
+    print("\n[INFO] Shutting down server.")
 finally:
     server_socket.close()
     cv2.destroyAllWindows()
