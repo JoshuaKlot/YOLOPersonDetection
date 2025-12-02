@@ -353,7 +353,6 @@ print(f"[INFO] Timestamp tolerance: {TIMESTAMP_TOLERANCE_SECONDS}s (valid)")
 print(f"[INFO] Warning threshold: {TIMESTAMP_WARNING_SECONDS}s (suspicious)")
 print("\n[INFO] Controls:")
 print("  Q - Quit stream")
-print("  M - Toggle mirror mode")
 print("  S - Show detailed statistics")
 
 window_counter = 0
