@@ -113,6 +113,24 @@ def verify_timestamp(timestamp_str, tolerance_seconds=3, warning_seconds=10):
     except Exception as e:
         return 'error', None, f"Invalid timestamp format: {timestamp_str}"
 
+def compute_frame_hash(frame):
+    """
+    Compute a hash of the frame for simple duplicate detection.
+    
+    Args:
+        frame: BGR image frame
+    
+    Returns:
+        Hash string
+    """
+    # Resize to smaller size for faster hashing
+    small_frame = cv2.resize(frame, (64, 64))
+    # Convert to grayscale
+    gray = cv2.cvtColor(small_frame, cv2.COLOR_BGR2GRAY)
+    # Compute hash
+    frame_hash = hashlib.md5(gray.tobytes()).hexdigest()
+    return frame_hash
+
 class SequenceLoopDetector:
     """Detect repeated (looped) footage by fingerprinting short sequences"""
     def __init__(self, window_size=8, hash_size=8, repeat_threshold=3, interval_tolerance=2, max_fingerprints=500):
@@ -195,9 +213,14 @@ def handle_client(conn, addr, window_id):
     print(f"[INFO] Connected to sender at {addr}")
     
     conn_file = conn.makefile('rb')
-    # Loop detection (optional - can be enabled/disabled)
-    detector = SequenceLoopDetector(window_size=8, hash_size=8, repeat_threshold=3, interval_tolerance=2)
-    repeat_count = 0
+    # Sequence-based loop detection
+    #detector = SequenceLoopDetector(window_size=8, hash_size=8, repeat_threshold=3, interval_tolerance=2)
+    #sequence_repeat_count = 0
+    
+    # Simple frame hash loop detection
+    seen_hashes = set()
+    frame_repeat_count = 0
+    max_seen_hashes = 1000  # Limit memory usage
     
     # Timestamp tracking
     tamper_count = 0
@@ -205,12 +228,10 @@ def handle_client(conn, addr, window_id):
     valid_timestamp_count = 0
     decode_fail_count = 0
     
-    # Per-connection mirror toggle (press 'm' to toggle)
-    mirror_stream = False
-    
     # Statistics
     total_frames = 0
     last_valid_timestamp = None
+    simple_loop_detections = 0
 
     try:
         while True:
@@ -229,12 +250,28 @@ def handle_client(conn, addr, window_id):
             
             total_frames += 1
 
-            # Optional: Loop detection
-            loop_detected, info = detector.add_frame(frame)
-            if loop_detected:
-                repeat_count += 1
+            # Simple frame hash-based loop detection
+            frame_hash = compute_frame_hash(frame)
+            if frame_hash in seen_hashes:
+                frame_repeat_count += 1
             else:
-                repeat_count = 0
+                seen_hashes.add(frame_hash)
+                frame_repeat_count = 0
+                
+                # Limit memory usage by clearing old hashes
+                if len(seen_hashes) > max_seen_hashes:
+                    seen_hashes.clear()
+            
+            # Track simple loop detections
+            if frame_repeat_count >= REPEAT_THRESHOLD:
+                simple_loop_detections += 1
+
+            # Sequence-based loop detection
+            # sequence_loop_detected, info = detector.add_frame(frame)
+            # if sequence_loop_detected:
+            #     sequence_repeat_count += 1
+            # else:
+            #     sequence_repeat_count = 0
 
             # Decode steganographic timestamp
             decoded_ts = decode_timestamp_steganography(frame)
@@ -291,17 +328,19 @@ def handle_client(conn, addr, window_id):
                 cv2.rectangle(frame, (0, 0), (frame.shape[1]-1, frame.shape[0]-1), 
                              (0, 0, 255), 3)
 
-            # # Loop detection overlay
-            # if repeat_count >= REPEAT_THRESHOLD:
-            #     cv2.putText(frame, "LOOP DETECTED", (20, 40),
-            #                 cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
-            #     print(f"[ALERT] {addr} - Loop detected in video stream")
-
-            # Apply mirror toggle if enabled
-            # if mirror_stream:
-            #     frame = cv2.flip(frame, 1)
-            #     cv2.putText(frame, "MIRROR", (frame.shape[1]-110, 30),
-            #                 cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+            # Frame hash loop detection overlay
+            if frame_repeat_count >= REPEAT_THRESHOLD:
+                cv2.putText(frame, "LOOP DETECTED (Frame Hash)", (20, 40),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+                if frame_repeat_count == REPEAT_THRESHOLD:  # Only print once per loop
+                    print(f"[ALERT] {addr} - Simple frame hash loop detected")
+            
+            # Sequence loop detection overlay (optional - can enable if desired)
+            # if sequence_repeat_count >= REPEAT_THRESHOLD:
+            #     cv2.putText(frame, "SEQUENCE LOOP DETECTED", (20, 75),
+            #                 cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 0), 2)
+            #     if sequence_repeat_count == REPEAT_THRESHOLD:
+            #         print(f"[ALERT] {addr} - Sequence loop detected")
 
             # Show comprehensive statistics
             stats_y = frame.shape[0] - 50
@@ -321,9 +360,6 @@ def handle_client(conn, addr, window_id):
             key = cv2.waitKey(1) & 0xFF
             if key == ord('q'):
                 break
-            # elif key == ord('m'):
-            #     mirror_stream = not mirror_stream
-            #     print(f"[INFO] {addr} - Mirror {'enabled' if mirror_stream else 'disabled'}")
             elif key == ord('s'):
                 # Print statistics
                 print(f"\n[STATS] {addr} Statistics:")
@@ -332,6 +368,7 @@ def handle_client(conn, addr, window_id):
                 print(f"  Warnings: {warning_count} ({100*warning_count/max(1,total_frames):.1f}%)")
                 print(f"  Tampered: {tamper_count} ({100*tamper_count/max(1,total_frames):.1f}%)")
                 print(f"  Decode failures: {decode_fail_count} ({100*decode_fail_count/max(1,total_frames):.1f}%)")
+                print(f"  Simple loop detections: {simple_loop_detections}")
                 if last_valid_timestamp:
                     print(f"  Last valid timestamp: {last_valid_timestamp}")
 
@@ -351,6 +388,7 @@ print("[INFO] Receiver server started, waiting for senders...")
 print("[INFO] Steganographic timestamp detection enabled")
 print(f"[INFO] Timestamp tolerance: {TIMESTAMP_TOLERANCE_SECONDS}s (valid)")
 print(f"[INFO] Warning threshold: {TIMESTAMP_WARNING_SECONDS}s (suspicious)")
+print("[INFO] Frame hash loop detection enabled")
 print("\n[INFO] Controls:")
 print("  Q - Quit stream")
 print("  S - Show detailed statistics")
