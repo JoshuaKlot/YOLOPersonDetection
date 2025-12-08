@@ -335,12 +335,6 @@ def handle_client(conn, addr, window_id):
                 if frame_repeat_count == REPEAT_THRESHOLD:  # Only print once per loop
                     print(f"[ALERT] {addr} - Simple frame hash loop detected")
             
-            # Sequence loop detection overlay (optional - can enable if desired)
-            # if sequence_repeat_count >= REPEAT_THRESHOLD:
-            #     cv2.putText(frame, "SEQUENCE LOOP DETECTED", (20, 75),
-            #                 cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 0), 2)
-            #     if sequence_repeat_count == REPEAT_THRESHOLD:
-            #         print(f"[ALERT] {addr} - Sequence loop detected")
 
             # Show comprehensive statistics
             stats_y = frame.shape[0] - 50
