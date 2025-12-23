@@ -7,63 +7,124 @@ import os
 from pathlib import Path
 import threading
 from queue import Queue
+import imagehash
+from PIL import Image
+from collections import deque
+from datetime import datetime
 
-def augment_face_data(face_roi, num_augmentations=3):
-    """Create augmented versions of face data to improve training"""
-    augmented_faces = [face_roi]  # Original face
+def encode_timestamp_steganography(frame, timestamp_str):
+    """
+    Encode timestamp into the least significant bits of pixel values.
+    Uses a distributed pattern across the image for robustness.
+    """
+    # Convert timestamp to binary
+    timestamp_bytes = timestamp_str.encode('utf-8')
+    timestamp_bits = ''.join(format(byte, '08b') for byte in timestamp_bytes)
     
-    for i in range(num_augmentations):
-        # Random rotation (-15 to +15 degrees)
-        angle = np.random.uniform(-15, 15)
-        rows, cols = face_roi.shape
-        rotation_matrix = cv2.getRotationMatrix2D((cols/2, rows/2), angle, 1)
-        rotated = cv2.warpAffine(face_roi, rotation_matrix, (cols, rows))
-        augmented_faces.append(rotated)
-        
-        # Slight brightness adjustment
-        brightness_factor = np.random.uniform(0.8, 1.2)
-        bright_adjusted = cv2.convertScaleAbs(face_roi, alpha=brightness_factor, beta=0)
-        augmented_faces.append(bright_adjusted)
-        
-        # Gaussian blur for slight smoothing
-        blurred = cv2.GaussianBlur(face_roi, (3, 3), 0.5)
-        augmented_faces.append(blurred)
-        
-        # Histogram equalization for lighting variations
-        equalized = cv2.equalizeHist(face_roi)
-        augmented_faces.append(equalized)
+    # Add length header (16 bits for string length)
+    length_bits = format(len(timestamp_str), '016b')
+    full_message = length_bits + timestamp_bits
     
-    return augmented_faces
+    # Calculate positions to modify (deterministic pattern)
+    height, width, channels = frame.shape
+    total_pixels = height * width * channels
+    
+    if len(full_message) > total_pixels:
+        raise ValueError("Frame too small to encode timestamp")
+    
+    # Create a copy to avoid modifying original
+    encoded_frame = frame.copy()
+    
+    # Encode bits into LSB of pixels
+    # Use a pseudo-random but deterministic pattern for pixel selection
+    np.random.seed(42)  # Fixed seed for reproducibility
+    pixel_positions = np.random.permutation(total_pixels)[:len(full_message)]
+    
+    bit_index = 0
+    for pos in pixel_positions:
+        # Convert flat position to (row, col, channel)
+        channel = int(pos % channels)
+        pixel_pos = int(pos // channels)
+        row = int(pixel_pos // width)
+        col = int(pixel_pos % width)
+        
+        # Bounds check
+        if row >= height or col >= width or channel >= channels:
+            continue
+        
+        # Get current pixel value
+        pixel_val = int(encoded_frame[row, col, channel])
+        
+        # Replace LSB with message bit
+        if full_message[bit_index] == '1':
+            new_val = pixel_val | 1  # Set LSB to 1
+        else:
+            new_val = pixel_val & ~1  # Set LSB to 0
+        
+        # Ensure value is in valid range
+        new_val = max(0, min(255, new_val))
+        encoded_frame[row, col, channel] = np.uint8(new_val)
+        
+        bit_index += 1
+    
+    return encoded_frame
 
-def preprocess_face(face_roi):
-    """Enhanced preprocessing for better recognition"""
-    # Histogram equalization for consistent lighting
-    face_roi = cv2.equalizeHist(face_roi)
+def augment_image(img):
+    """Generate augmented versions of an image with different lighting and processing"""
+    augmented_images = []
     
-    # Gaussian blur to reduce noise
-    face_roi = cv2.GaussianBlur(face_roi, (3, 3), 0.5)
+    # Original image
+    augmented_images.append(img.copy())
     
-    # Resize to consistent size
-    face_roi = cv2.resize(face_roi, (100, 100))  # Larger than original for better features
+    # Slightly rotated faces (small angles)
+    height, width = img.shape[:2]
+    center = (width // 2, height // 2)
     
-    return face_roi
+    for angle in [-5, 5]:
+        matrix = cv2.getRotationMatrix2D(center, angle, 1.0)
+        rotated = cv2.warpAffine(img, matrix, (width, height))
+        augmented_images.append(rotated)
+    
+    # Brightness adjustments (more moderate)
+    bright = cv2.convertScaleAbs(img, alpha=1.2, beta=20)
+    augmented_images.append(bright)
+    
+    dark = cv2.convertScaleAbs(img, alpha=0.8, beta=-20)
+    augmented_images.append(dark)
+    
+    # CLAHE (best for lighting variations)
+    gray_temp = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+    clahe_applied = clahe.apply(gray_temp)
+    clahe_bgr = cv2.cvtColor(clahe_applied, cv2.COLOR_GRAY2BGR)
+    augmented_images.append(clahe_bgr)
+    
+    # Histogram equalization
+    equalized = cv2.equalizeHist(gray_temp)
+    equalized_bgr = cv2.cvtColor(equalized, cv2.COLOR_GRAY2BGR)
+    augmented_images.append(equalized_bgr)
+    
+    # Gaussian blur (slight)
+    blurred = cv2.GaussianBlur(img, (3, 3), 0)
+    augmented_images.append(blurred)
+    
+    # Sharpening
+    kernel = np.array([[-1,-1,-1], [-1,9,-1], [-1,-1,-1]])
+    sharpened = cv2.filter2D(img, -1, kernel)
+    augmented_images.append(sharpened)
+    
+    return augmented_images
 
-def load_face_database(database_path, max_faces_per_person=5, use_augmentation=True):
-    """Load faces from database folder and train the recognizer - with improvements for small datasets"""
+def load_face_database(database_path, max_faces_per_person=10, use_augmentation=True):
+    """Load faces from database folder with augmentation and train the recognizer"""
     face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
-    
-    # Try different recognizers - EigenFaces often works better with small datasets
-    # Uncomment one of these alternatives:
-    # face_recognizer = cv2.face.EigenFaceRecognizer_create()  # Often better for small datasets
-    # face_recognizer = cv2.face.FisherFaceRecognizer_create() # Good for small datasets with multiple classes
-    
-    # LBPH with optimized parameters for small datasets
+    # Adjusted parameters for better recognition
     face_recognizer = cv2.face.LBPHFaceRecognizer_create(
-        radius=2,        # Increased radius for more features
-        neighbors=10,    # More neighbors for robustness
-        grid_x=8,       # Standard grid
-        grid_y=8,       # Standard grid
-        threshold=100.0  # Lower initial threshold
+        radius=1,
+        neighbors=8,
+        grid_x=8,
+        grid_y=8,
+        threshold=200.0
     )
     
     training_faces = []
@@ -72,7 +133,7 @@ def load_face_database(database_path, max_faces_per_person=5, use_augmentation=T
     label_counter = 0
     
     print(f"[INFO] Loading face database from: {database_path}")
-    print(f"[INFO] Data augmentation: {'ON' if use_augmentation else 'OFF'}")
+    print(f"[INFO] Augmentation: {'ENABLED' if use_augmentation else 'DISABLED'}")
     
     if not os.path.exists(database_path):
         print(f"[ERROR] Database path does not exist: {database_path}")
@@ -92,12 +153,14 @@ def load_face_database(database_path, max_faces_per_person=5, use_augmentation=T
         image_files = [f for f in os.listdir(person_path) 
                       if Path(f).suffix.lower() in image_extensions]
         image_files = image_files[:max_faces_per_person]
+        print(f"[INFO] Found {len(image_files)} images for {person_folder}")
         
         for image_file in image_files:
             image_path = os.path.join(person_path, image_file)
             
             try:
                 img = cv2.imread(image_path)
+                print(f"[INFO] Processing: {image_path}")
                 if img is None:
                     continue
                 
@@ -108,36 +171,33 @@ def load_face_database(database_path, max_faces_per_person=5, use_augmentation=T
                     new_width = int(width * scale)
                     new_height = int(height * scale)
                     img = cv2.resize(img, (new_width, new_height))
-                    
-                gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
                 
-                # More aggressive face detection for training
-                faces = face_cascade.detectMultiScale(
-                    gray, 
-                    scaleFactor=1.1,     # More sensitive
-                    minNeighbors=3,      # Less strict
-                    minSize=(30, 30),
-                    maxSize=(300, 300)
-                )
+                # Generate augmented versions if enabled
+                if use_augmentation:
+                    augmented_imgs = augment_image(img)
+                else:
+                    augmented_imgs = [img]
                 
-                for (x, y, w, h) in faces:
-                    # Extract face ROI
-                    roi_gray = gray[y:y+h, x:x+w]
+                faces_added = 0
+                # Process each augmented version
+                for aug_idx, aug_img in enumerate(augmented_imgs):
+                    gray = cv2.cvtColor(aug_img, cv2.COLOR_BGR2GRAY)
                     
-                    # Enhanced preprocessing
-                    roi_processed = preprocess_face(roi_gray)
+                    # Use more lenient detection parameters for Pi
+                    faces = face_cascade.detectMultiScale(gray, 1.2, 3, minSize=(30, 30))
                     
-                    if use_augmentation:
-                        # Create augmented versions
-                        augmented_faces = augment_face_data(roi_processed, num_augmentations=2)
-                        for aug_face in augmented_faces:
-                            training_faces.append(aug_face)
-                            training_labels.append(label_counter)
-                            person_faces.append(aug_face)
-                    else:
-                        training_faces.append(roi_processed)
+                    for (x, y, w, h) in faces:
+                        # Extract and resize face ROI
+                        roi_gray = gray[y:y+h, x:x+w]
+                        roi_gray = cv2.resize(roi_gray, (80, 80))
+                        
+                        training_faces.append(roi_gray)
                         training_labels.append(label_counter)
-                        person_faces.append(roi_processed)
+                        person_faces.append(roi_gray)
+                        faces_added += 1
+                
+                if faces_added > 0:
+                    print(f"  → Generated {faces_added} face samples from {image_file}")
                     
             except Exception as e:
                 print(f"[WARNING] Error processing {image_path}: {e}")
@@ -146,7 +206,7 @@ def load_face_database(database_path, max_faces_per_person=5, use_augmentation=T
         if person_faces:
             person_names[label_counter] = person_folder
             label_counter += 1
-            print(f"[INFO] Loaded {len(person_faces)} face samples for {person_folder}")
+            print(f"[INFO] Total: {len(person_faces)} face samples for {person_folder}")
         else:
             print(f"[WARNING] No faces found for {person_folder}")
     
@@ -154,7 +214,7 @@ def load_face_database(database_path, max_faces_per_person=5, use_augmentation=T
         print("[ERROR] No faces found in database!")
         return None, {}, False
     
-    print(f"[INFO] Training recognizer with {len(training_faces)} face samples from {len(person_names)} people...")
+    print(f"\n[INFO] Training recognizer with {len(training_faces)} face samples from {len(person_names)} people...")
     
     try:
         face_recognizer.train(training_faces, np.array(training_labels))
@@ -169,15 +229,15 @@ database_path = input("Enter the path to facial database folder: ").strip()
 if not database_path:
     database_path = "./face_database"
 
-# Ask about data augmentation
-use_aug = input("Use data augmentation? (y/n, default=y): ").strip().lower()
+# Ask about augmentation
+use_aug = input("Enable image augmentation for better lighting variations? (Y/n): ").strip().lower()
 use_augmentation = use_aug != 'n'
 
-# Load face database with improvements
-print("[INFO] Loading database with enhanced preprocessing...")
+# Load face database with augmentation
+print(f"\n[INFO] Loading database with augmentation {'enabled' if use_augmentation else 'disabled'}...")
 face_recognizer, person_names, database_loaded = load_face_database(
     database_path, 
-    max_faces_per_person=5, 
+    max_faces_per_person=200,
     use_augmentation=use_augmentation
 )
 
@@ -186,7 +246,9 @@ if not database_loaded:
     exit()
 
 # Ask the user for the receiver IP
-RECEIVER_IP = input("Enter the receiver IP address: ").strip()
+RECEIVER_IP = input("\nEnter the receiver IP address: ").strip()
+if not RECEIVER_IP:
+    RECEIVER_IP = "localhost"
 RECEIVER_PORT = 9999
 print(f"[INFO] Connecting to receiver at {RECEIVER_IP}:{RECEIVER_PORT}...")
 
@@ -210,21 +272,26 @@ if not cam.isOpened():
 face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
 
 print("\n[INFO] Loaded people in database:", list(person_names.values()))
-print("\n[INFO] Enhanced Recognition Features:")
-print("  - Data augmentation for small datasets")
-print("  - Improved preprocessing (histogram equalization, denoising)")
-print("  - Optimized LBPH parameters")
-print("  - Better confidence thresholds")
+print("\n[INFO] Pi Optimizations active:")
+print("  - Reduced resolution: 480x360")
+print("  - Lower FPS: 15")
+print("  - Face recognition every frame")
+if use_augmentation:
+    print("  - Image augmentation: 8x samples per face (lighting variations)")
+print("  - Steganographic timestamp encoding (invisible, tamper-evident)")
+print("  - PNG encoding for lossless timestamp preservation")
 print("\n[INFO] Controls:")
 print("  SPACE - Start/stop recording")
 print("  L - Play recorded loop manually")
 print("  A - Toggle auto-loop when known face detected")
 print("  S - Show database statistics")
+print("  M - Mirror the stream during loop playback")
 print("  + - Increase confidence threshold (stricter)")
 print("  - - Decrease confidence threshold (looser)")
 print("  Q - Quit")
 
-# Variables - adjusted for better recognition with small datasets
+# Variables
+mirror_stream = False
 recording = False
 recorded_frames = []
 loop_index = 0
@@ -232,7 +299,7 @@ inserting_loop = False
 auto_loop_enabled = False
 face_detected_counter = 0
 FACE_DETECTION_THRESHOLD = 3
-CONFIDENCE_THRESHOLD = 80  # Lower threshold to start with (more lenient)
+CONFIDENCE_THRESHOLD = 120
 frame_counter = 0
 FACE_RECOGNITION_INTERVAL = 1
 
@@ -258,25 +325,26 @@ try:
             
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         
+        # Only do face detection/recognition every few frames
         known_face_detected = False
         if frame_counter % FACE_RECOGNITION_INTERVAL == 0:
-            # Detect faces
             faces = face_cascade.detectMultiScale(
                 gray, 1.2, 3, 
                 minSize=(40, 40),
                 maxSize=(200, 200)
             )
             
+            # Draw rectangles and recognize faces
             for (x, y, w, h) in faces:
                 cv2.rectangle(frame, (x, y), (x+w, y+h), (255, 0, 0), 2)
                 
-                # Extract and preprocess face for recognition
                 roi_gray = gray[y:y+h, x:x+w]
-                roi_processed = preprocess_face(roi_gray)
+                roi_gray = cv2.resize(roi_gray, (80, 80))
+                # Apply histogram equalization to normalize lighting
+                roi_processed = cv2.equalizeHist(roi_gray)
                 
                 label, confidence = face_recognizer.predict(roi_processed)
                 
-                # Check if confidence is good enough
                 if confidence < CONFIDENCE_THRESHOLD:
                     person_name = person_names.get(label, f"Person_{label}")
                     cv2.putText(frame, f"{person_name} ({confidence:.0f})", 
@@ -298,16 +366,28 @@ try:
             if not known_face_detected:
                 face_detected_counter = 0
         
-        # Show confidence threshold
-        cv2.putText(frame, f"Conf Threshold: {CONFIDENCE_THRESHOLD}", (10, 25), 
+        # Display status
+        status_text = []
+        status_text.append(f"FPS: {current_fps}")
+        if recording:
+            status_text.append("REC")
+        status_text.append(f"DB: {len(person_names)}")
+        if auto_loop_enabled:
+            status_text.append("AUTO")
+        if inserting_loop:
+            status_text.append("LOOP")
+            
+        cv2.putText(frame, " | ".join(status_text), (10, 30), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
+        
+        cv2.putText(frame, f"Conf Threshold: {CONFIDENCE_THRESHOLD}", (10, 50), 
                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 0), 1)
         
-        # Show FPS
-        cv2.putText(frame, f"FPS: {current_fps}", (10, 45), 
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 255), 1)
-        
-        key = cv2.waitKey(1) & 0xFF
+        cv2.putText(frame, "Stego TS: ON", (10, 70), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 0), 1)
+
         cv2.imshow("Sender", frame)
+        key = cv2.waitKey(1) & 0xFF
         
         # Handle keyboard input
         if key == ord(' '):
@@ -338,18 +418,26 @@ try:
             print(f"[INFO] Confidence threshold: {CONFIDENCE_THRESHOLD} (more lenient)")
             
         elif key == ord('s'):
-            print("\n[INFO] Enhanced System Statistics:")
+            print("\n[INFO] System Statistics:")
             print(f"  Current FPS: {current_fps}")
             print(f"  Total people in DB: {len(person_names)}")
-            print(f"  Data augmentation: {'ON' if use_augmentation else 'OFF'}")
+            print(f"  Augmentation: {'ENABLED' if use_augmentation else 'DISABLED'}")
             for label, name in person_names.items():
                 print(f"  Label {label}: {name}")
             print(f"  Confidence threshold: {CONFIDENCE_THRESHOLD}")
-            print(f"  Face size: 100x100 pixels")
-            print(f"  Recognition interval: every {FACE_RECOGNITION_INTERVAL} frames")
+            print(f"  Frame size: {frame.shape[1]}x{frame.shape[0]}")
             
         elif key == ord('q'):
             break
+        elif key == ord('m'):
+            mirror_stream = not mirror_stream
+            print(f"[INFO] Mirror stream during loop playback {'enabled' if mirror_stream else 'disabled'}")
+        # Encode steganographic timestamp on the frame to be sent
+        ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        try:
+            frame = encode_timestamp_steganography(frame, ts)
+        except Exception as e:
+            print(f"[WARNING] Failed to encode timestamp: {e}")
         
         # Record live frames if recording is on
         if recording:
@@ -357,16 +445,23 @@ try:
         
         # Decide which frame to send
         if inserting_loop and recorded_frames:
-            source_frame = recorded_frames[loop_index]
+            idx = min(loop_index, len(recorded_frames) - 1)
+            orig_loop_frame = recorded_frames[idx]
+            if mirror_stream:
+                source_frame = cv2.flip(orig_loop_frame, 1)
+            else:
+                source_frame = orig_loop_frame.copy()
             loop_index += 1
             if loop_index >= len(recorded_frames):
                 inserting_loop = False
                 print("[INFO] Loop playback finished. Returning to live feed.")
         else:
-            source_frame = frame
+            source_frame = frame.copy()
         
-        # Encode and send the frame
-        result, encoded = cv2.imencode('.jpg', source_frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+
+        # Encode and send the frame using PNG for lossless compression
+        # This preserves the LSB data for timestamp verification
+        result, encoded = cv2.imencode('.png', source_frame)
         frame_bytes = encoded.tobytes()
         conn_file.write(struct.pack('<L', len(frame_bytes)))
         conn_file.write(frame_bytes)
@@ -379,6 +474,8 @@ try:
     
 except Exception as e:
     print(f"[ERROR] {e}")
+    import traceback
+    traceback.print_exc()
 finally:
     cam.release()
     cv2.destroyAllWindows()
